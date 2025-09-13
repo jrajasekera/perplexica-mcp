@@ -10,6 +10,7 @@ This repo hosts a minimal **Model Context Protocol (MCP) tool server** exposing 
 * **Runtime:** Node ≥ 18.17, TypeScript, ESM (NodeNext), pnpm.
 * **Key deps:** `@modelcontextprotocol/sdk`, `zod`, `tsx`, `typescript`, `@types/node`.
 * **Env:** `PERPLEXICA_BASE_URL` (defaults to `http://localhost:3000`).
+* **Env (optional):** `MCP_REQUEST_TIMEOUT_MS` to set default HTTP timeout for tool calls (helps avoid Inspector timeouts). Defaults to 120000ms.
 * **Request:** `{ query, focusMode, optimizationMode, chatModel?, embeddingModel?, systemInstructions?, history?, stream=false }`.
 * **Response:** final synthesized **message** + **sources** list (title + URL).
 
@@ -154,6 +155,7 @@ This repo hosts a minimal **Model Context Protocol (MCP) tool server** exposing 
 
 * **Add streaming:** Register `perplexica.search.stream` that sets `stream: true` and parses NDJSON, emitting incremental MCP messages.
 * **Add healthcheck tool:** `perplexica.health` that GETs `BASE_URL/health` (if Perplexica exposes it) and returns status.
+  - Implemented here as a GET to `BASE_URL/api/models` to verify reachability and summarize providers/models.
 * **Extra focus modes:** If Perplexica adds modes (e.g., `arxivSearch`), extend the Zod enum and payload.
 
 ---
@@ -161,6 +163,7 @@ This repo hosts a minimal **Model Context Protocol (MCP) tool server** exposing 
 ## Triage checklist (for agents)
 
 * [ ] Is Perplexica reachable at `PERPLEXICA_BASE_URL`?
+* [ ] If Inspector times out: set `timeoutMs` lower (e.g., `20000`) in the tool input, or set `MCP_REQUEST_TIMEOUT_MS` env to a value less than the Inspector’s request timeout so the tool returns a clear error instead of the Inspector timing out.
 * [ ] Does Inspector show input boxes? If not, restart after ensuring `registerTool` + Zod shape.
 * [ ] Are `@types/node`, `zod`, `typescript`, `tsx` installed and tsconfig includes Node + DOM libs?
 * [ ] Any duplicate `zod` versions? Run `pnpm ls zod` and pin via overrides if needed.

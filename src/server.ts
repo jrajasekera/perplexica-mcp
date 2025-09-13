@@ -6,6 +6,9 @@ type HistoryTurn = ["human" | "assistant", string];
 
 const server = new McpServer({ name: "perplexica-mcp", version: "0.1.0" });
 
+// Allow overriding the default HTTP timeout to avoid MCP client timeouts
+const DEFAULT_TIMEOUT_MS = Number(process.env.MCP_REQUEST_TIMEOUT_MS) || 120_000;
+
 // ✅ define a Zod shape (Record<string, ZodTypeAny>)
 const inputShape = {
     query: z.string().describe("Search query or question"),
@@ -42,7 +45,7 @@ const inputShape = {
     systemInstructions: z.string().optional(),
     history: z.array(z.tuple([z.enum(["human", "assistant"]), z.string()])).optional(),
     stream: z.boolean().default(false),
-    timeoutMs: z.number().int().positive().default(120000),
+    timeoutMs: z.number().int().positive().default(DEFAULT_TIMEOUT_MS),
 } satisfies Record<string, z.ZodTypeAny>;
 
 server.registerTool(
@@ -76,7 +79,7 @@ server.registerTool(
         if (args.history) payload.history = args.history as HistoryTurn[];
 
         const ac = new AbortController();
-        const tid = setTimeout(() => ac.abort(), (args.timeoutMs as number) ?? 120000);
+        const tid = setTimeout(() => ac.abort(), (args.timeoutMs as number) ?? DEFAULT_TIMEOUT_MS);
 
         try {
             const res = await fetch(url, {
@@ -108,6 +111,46 @@ server.registerTool(
         } catch (e: any) {
             clearTimeout(tid);
             return { isError: true, content: [{ type: "text", text: `Failed to reach Perplexica: ${e?.message || e}` }] };
+        }
+    }
+);
+
+// Lightweight healthcheck: verifies Perplexica is reachable and lists model count
+server.registerTool(
+    "perplexica.health",
+    {
+        title: "Perplexica Health",
+        description: "Check connectivity to Perplexica and basic API health.",
+        inputSchema: {
+            baseUrl: z
+                .string()
+                .default(process.env.PERPLEXICA_BASE_URL || "http://localhost:3000")
+                .describe("Perplexica base URL"),
+            timeoutMs: z.number().int().positive().default(DEFAULT_TIMEOUT_MS),
+        },
+    },
+    async (args) => {
+        const baseUrl =
+            (args.baseUrl as string) || process.env.PERPLEXICA_BASE_URL || "http://localhost:3000";
+        const modelsUrl = `${baseUrl.replace(/\/$/, "")}/api/models`;
+
+        const ac = new AbortController();
+        const tid = setTimeout(() => ac.abort(), (args.timeoutMs as number) ?? DEFAULT_TIMEOUT_MS);
+        try {
+            const res = await fetch(modelsUrl, { signal: ac.signal });
+            clearTimeout(tid);
+            if (!res.ok) {
+                const text = await res.text().catch(() => "");
+                return { isError: true, content: [{ type: "text", text: `Perplexica models probe failed ${res.status}: ${text}` }] };
+            }
+            const data: any = await res.json().catch(() => ({}));
+            const providers = Object.keys(data?.models || {});
+            const count = providers.reduce((n, p) => n + (Array.isArray(data.models[p]) ? data.models[p].length : 0), 0);
+            const summary = `OK: reachable at ${baseUrl}. Providers: ${providers.length}, total models: ${count}.`;
+            return { content: [{ type: "text", text: summary }] };
+        } catch (e: any) {
+            clearTimeout(tid);
+            return { isError: true, content: [{ type: "text", text: `Failed to reach Perplexica at ${baseUrl}: ${e?.message || e}` }] };
         }
     }
 );
