@@ -58,6 +58,7 @@ This repo hosts a minimal **Model Context Protocol (MCP) tool server** exposing 
 ## How agents should call the tool
 
 **Tool name:** `perplexica.search`
+* For detailed HTTP API specs, see [Perplexica API Documentation](perplexica-api.md).
 
 **Input schema (Zod shape):**
 
