@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "src",
+    "outDir": "dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+
+    // ✅ so TS knows about global `process` and Node runtime
+    "types": ["node"],
+
+    // ✅ so TS knows about `fetch`, `Response`, etc.
+    "lib": ["ES2022", "DOM"]
+  },
+  "include": ["src"]
+}
