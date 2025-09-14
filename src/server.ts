@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { logger, redact } from "./logger.js";
 
 type HistoryTurn = ["human" | "assistant", string];
 
@@ -57,6 +58,7 @@ server.registerTool(
         inputSchema: inputShape,
     },
     async (args) => {
+        logger.debug("perplexica.search invoked", { args: redact(args) });
         const baseUrl =
             (args.baseUrl as string) || process.env.PERPLEXICA_BASE_URL || "http://localhost:3000";
         const url = `${baseUrl.replace(/\/$/, "")}/api/search`;
@@ -64,6 +66,7 @@ server.registerTool(
         const query = (args.query as string) || "";
         const focusMode = (args.focusMode as string) || "webSearch";
         if (!query) {
+            logger.warn("Missing query in tool input");
             return { isError: true, content: [{ type: "text", text: "Missing query." }] };
         }
 
@@ -78,10 +81,13 @@ server.registerTool(
         if (args.systemInstructions) payload.systemInstructions = args.systemInstructions;
         if (args.history) payload.history = args.history as HistoryTurn[];
 
+        logger.debug("Prepared payload for Perplexica API", { url, payload: redact(payload) });
+
         const ac = new AbortController();
         const tid = setTimeout(() => ac.abort(), (args.timeoutMs as number) ?? DEFAULT_TIMEOUT_MS);
 
         try {
+            logger.info("POST /api/search", { url, timeoutMs: (args.timeoutMs as number) ?? DEFAULT_TIMEOUT_MS });
             const res = await fetch(url, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -90,14 +96,19 @@ server.registerTool(
             });
             clearTimeout(tid);
 
+            logger.info("Received response from Perplexica", { status: res.status, ok: res.ok });
+
             if (!res.ok) {
                 const text = await res.text().catch(() => "");
+                logger.warn("Perplexica returned non-OK status", { status: res.status, bodyPreview: text.slice(0, 500) });
                 return { isError: true, content: [{ type: "text", text: `Perplexica error ${res.status}: ${text}` }] };
             }
 
             const data: any = await res.json();
             const message: string = data?.message ?? "";
             const sources: any[] = Array.isArray(data?.sources) ? data.sources : [];
+
+            logger.debug("Parsed Perplexica response", { messageLength: message?.length ?? 0, sourcesCount: sources.length });
 
             const formattedSources = sources
                 .map((s: any, i: number) => `${i + 1}. **${s?.metadata?.title ?? "Untitled"}**: ${s?.metadata?.url ?? ""}`)
@@ -110,7 +121,9 @@ server.registerTool(
             return { content: [{ type: "text", text: body }] };
         } catch (e: any) {
             clearTimeout(tid);
-            return { isError: true, content: [{ type: "text", text: `Failed to reach Perplexica: ${e?.message || e}` }] };
+            const errMsg = e?.name === "AbortError" ? "Request aborted (timeout)" : e?.message || String(e);
+            logger.error("Error calling Perplexica API", { message: errMsg });
+            return { isError: true, content: [{ type: "text", text: `Failed to reach Perplexica: ${errMsg}` }] };
         }
     }
 );
@@ -130,6 +143,7 @@ server.registerTool(
         },
     },
     async (args) => {
+        logger.debug("perplexica.health invoked", { args: redact(args) });
         const baseUrl =
             (args.baseUrl as string) || process.env.PERPLEXICA_BASE_URL || "http://localhost:3000";
         const modelsUrl = `${baseUrl.replace(/\/$/, "")}/api/models`;
@@ -137,23 +151,35 @@ server.registerTool(
         const ac = new AbortController();
         const tid = setTimeout(() => ac.abort(), (args.timeoutMs as number) ?? DEFAULT_TIMEOUT_MS);
         try {
+            logger.info("GET /api/models", { url: modelsUrl, timeoutMs: (args.timeoutMs as number) ?? DEFAULT_TIMEOUT_MS });
             const res = await fetch(modelsUrl, { signal: ac.signal });
             clearTimeout(tid);
+            logger.info("Received response from Perplexica (models)", { status: res.status, ok: res.ok });
             if (!res.ok) {
                 const text = await res.text().catch(() => "");
+                logger.warn("Models probe returned non-OK status", { status: res.status, bodyPreview: text.slice(0, 500) });
                 return { isError: true, content: [{ type: "text", text: `Perplexica models probe failed ${res.status}: ${text}` }] };
             }
             const data: any = await res.json().catch(() => ({}));
             const providers = Object.keys(data?.models || {});
             const count = providers.reduce((n, p) => n + (Array.isArray(data.models[p]) ? data.models[p].length : 0), 0);
             const summary = `OK: reachable at ${baseUrl}. Providers: ${providers.length}, total models: ${count}.`;
+            logger.debug("Health probe summary", { providers: providers.length, count });
             return { content: [{ type: "text", text: summary }] };
         } catch (e: any) {
             clearTimeout(tid);
-            return { isError: true, content: [{ type: "text", text: `Failed to reach Perplexica at ${baseUrl}: ${e?.message || e}` }] };
+            const errMsg = e?.name === "AbortError" ? "Request aborted (timeout)" : e?.message || String(e);
+            logger.error("Error probing Perplexica models", { message: errMsg });
+            return { isError: true, content: [{ type: "text", text: `Failed to reach Perplexica at ${baseUrl}: ${errMsg}` }] };
         }
     }
 );
 
 const transport = new StdioServerTransport();
+logger.info("Starting MCP server", {
+    defaultTimeoutMs: DEFAULT_TIMEOUT_MS,
+    baseUrl: process.env.PERPLEXICA_BASE_URL || "http://localhost:3000",
+    logLevel: process.env.MCP_LOG_LEVEL || "info",
+});
 await server.connect(transport);
+logger.info("MCP server connected (stdio)");
