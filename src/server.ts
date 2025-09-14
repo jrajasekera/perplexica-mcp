@@ -101,6 +101,23 @@ interface PerplexicaSearchRequestPayload {
   stream: boolean;
 }
 
+// Unified error codes for programmatic handling
+type ErrorCode =
+  | "VALIDATION_ERROR"
+  | "TIMEOUT"
+  | "NETWORK_ERROR"
+  | "UPSTREAM_ERROR"
+  | "UPSTREAM_INVALID_JSON";
+
+function errorResult(code: ErrorCode, message: string, details?: Record<string, unknown>) {
+  const lines = [`[${code}] ${message}`];
+  if (details && Object.keys(details).length) {
+    lines.push("", "Details:", JSON.stringify(redact(details)));
+  }
+  const textContent = { type: "text" as const, text: lines.join("\n") };
+  return { isError: true, content: [textContent] };
+}
+
 const server = new McpServer({ name: "perplexica-mcp", version: "0.1.0" });
 
 server.registerTool(
@@ -120,7 +137,7 @@ server.registerTool(
 
       if (!args.query) {
         logger.warn("Missing query in tool input");
-        return { isError: true, content: [{ type: "text", text: "Missing query." }] };
+        return errorResult("VALIDATION_ERROR", "Missing required field: query");
       }
 
       const payload: PerplexicaSearchRequestPayload = {
@@ -155,10 +172,21 @@ server.registerTool(
         if (!res.ok) {
           const text = await res.text().catch(() => "");
           logger.warn("Perplexica returned non-OK status", { status: res.status, bodyPreview: text.slice(0, 500) });
-          return { isError: true, content: [{ type: "text", text: `Perplexica error ${res.status}: ${text}` }] };
+          return errorResult("UPSTREAM_ERROR", `Perplexica responded with status ${res.status}.`, {
+            status: res.status,
+            statusText: res.statusText,
+            bodyPreview: (text || "").slice(0, 1000),
+            url,
+          });
         }
 
-        const json = (await res.json()) as unknown;
+        let json: unknown;
+        try {
+          json = await res.json();
+        } catch (parseErr) {
+          logger.warn("Failed to parse Perplexica JSON", { message: (parseErr as Error)?.message });
+          return errorResult("UPSTREAM_INVALID_JSON", "Response from Perplexica was not valid JSON.", { url });
+        }
         const parsed = SearchResponseSchema.safeParse(json);
         if (!parsed.success) {
           logger.warn("Search response failed validation", { issues: parsed.error.issues });
@@ -181,10 +209,18 @@ server.registerTool(
         return { content: [{ type: "text", text: body }] };
       } catch (e: unknown) {
         clearTimeout(tid);
-        const err = e as { name?: string; message?: string } | undefined;
-        const errMsg = err?.name === "AbortError" ? "Request aborted (timeout)" : err?.message || String(e);
-        logger.error("Error calling Perplexica API", { message: errMsg });
-        return { isError: true, content: [{ type: "text", text: `Failed to reach Perplexica: ${errMsg}` }] };
+        const err: any = e;
+        if (err?.name === "AbortError") {
+          logger.error("Search request timed out", { timeoutMs: timeout, url });
+          return errorResult("TIMEOUT", `Request to Perplexica timed out after ${timeout}ms.`, { url, timeoutMs: timeout });
+        }
+        const cause = err?.cause ?? {};
+        const code = cause.code || err?.code;
+        logger.error("Network error calling Perplexica API", { message: err?.message, code });
+        return errorResult("NETWORK_ERROR", err?.message || "Network error while reaching Perplexica.", {
+          url,
+          code,
+        });
       }
     }
 );
@@ -225,9 +261,22 @@ server.registerTool(
         if (!res.ok) {
           const text = await res.text().catch(() => "");
           logger.warn("Models probe returned non-OK status", { status: res.status, bodyPreview: text.slice(0, 500) });
-          return { isError: true, content: [{ type: "text", text: `Perplexica models probe failed ${res.status}: ${text}` }] };
+          return errorResult("UPSTREAM_ERROR", `Perplexica models probe failed with status ${res.status}.`, {
+            status: res.status,
+            statusText: res.statusText,
+            bodyPreview: (text || "").slice(0, 1000),
+            url: modelsUrl,
+          });
         }
-        const json = (await res.json().catch(() => ({}))) as unknown;
+        let json: unknown;
+        try {
+          json = await res.json();
+        } catch (parseErr) {
+          logger.warn("Failed to parse models JSON", { message: (parseErr as Error)?.message });
+          return errorResult("UPSTREAM_INVALID_JSON", "Response from Perplexica models endpoint was not valid JSON.", {
+            url: modelsUrl,
+          });
+        }
         const parsed = ModelsResponseSchema.safeParse(json);
         const data: PerplexicaModelsResponse = parsed.success ? parsed.data : {};
         const providers = Object.keys(data.models ?? {});
@@ -237,10 +286,18 @@ server.registerTool(
         return { content: [{ type: "text", text: summary }] };
       } catch (e: unknown) {
         clearTimeout(tid);
-        const err = e as { name?: string; message?: string } | undefined;
-        const errMsg = err?.name === "AbortError" ? "Request aborted (timeout)" : err?.message || String(e);
-        logger.error("Error probing Perplexica models", { message: errMsg });
-        return { isError: true, content: [{ type: "text", text: `Failed to reach Perplexica at ${baseUrl}: ${errMsg}` }] };
+        const err: any = e;
+        if (err?.name === "AbortError") {
+          logger.error("Models probe timed out", { timeoutMs: timeout, url: modelsUrl });
+          return errorResult("TIMEOUT", `Request to Perplexica timed out after ${timeout}ms.`, { url: modelsUrl, timeoutMs: timeout });
+        }
+        const cause = err?.cause ?? {};
+        const code = cause.code || err?.code;
+        logger.error("Network error probing Perplexica models", { message: err?.message, code });
+        return errorResult("NETWORK_ERROR", err?.message || "Network error while reaching Perplexica.", {
+          url: modelsUrl,
+          code,
+        });
       }
     }
 );
