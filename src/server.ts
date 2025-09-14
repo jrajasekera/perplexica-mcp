@@ -41,13 +41,13 @@ const inputShape = {
     .enum([
       "webSearch",
       "academicSearch",
-      "writingAssistant",
+      // "writingAssistant",
       "wolframAlphaSearch",
       "youtubeSearch",
       "redditSearch",
     ])
     .default("webSearch")
-    .describe("What to focus on"),
+    .describe("Specifies which focus mode to use"),
   optimizationMode: z.enum(["speed", "balanced"]).default("balanced"),
   baseUrl: z
     .string()
@@ -125,7 +125,6 @@ server.registerTool(
     {
         title: "Perplexica Search",
         description: "Search the internet via Perplexica and return answer with sources.",
-        // ✅ pass the SHAPE here, not z.object(...)
         inputSchema: inputShape,
     },
     async (rawArgs) => {
