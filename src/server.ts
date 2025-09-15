@@ -121,14 +121,14 @@ function errorResult(code: ErrorCode, message: string, details?: Record<string, 
 const server = new McpServer({ name: "perplexica-mcp", version: "0.1.0" });
 
 server.registerTool(
-    "perplexica.search",
+    "perplexica_search",
     {
         title: "Perplexica Search",
         description: "Search the internet via Perplexica and return answer with sources.",
         inputSchema: inputShape,
     },
     async (rawArgs) => {
-      logger.debug("perplexica.search invoked", { args: redact(rawArgs) });
+      logger.debug("perplexica_search invoked", { args: redact(rawArgs) });
       const args = InputSchema.parse(rawArgs);
 
       const baseUrl = args.baseUrl || process.env.PERPLEXICA_BASE_URL || "http://localhost:3000";
@@ -226,7 +226,7 @@ server.registerTool(
 
 // Lightweight healthcheck: verifies Perplexica is reachable and lists model count
 server.registerTool(
-    "perplexica.health",
+    "perplexica_health",
     {
         title: "Perplexica Health",
         description: "Check connectivity to Perplexica and basic API health.",
@@ -239,7 +239,7 @@ server.registerTool(
         },
     },
     async (rawArgs) => {
-      logger.debug("perplexica.health invoked", { args: redact(rawArgs) });
+      logger.debug("perplexica_health invoked", { args: redact(rawArgs) });
       const HealthInputSchema = z.object({
         baseUrl: z.string().default(process.env.PERPLEXICA_BASE_URL || "http://localhost:3000"),
         timeoutMs: z.number().int().positive().default(DEFAULT_TIMEOUT_MS),
