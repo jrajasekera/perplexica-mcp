@@ -217,9 +217,3 @@ Expect a concise answer followed by a numbered list of source links.
 
 MCP makes it easy for tools to interoperate across AI agents. This server offers a small, audited surface area that cleanly bridges local agents to Perplexica’s powerful search and synthesis, without leaking secrets or adding heavy dependencies.
 
----
-
-## License
-
-See the repository’s license file if provided. Otherwise, treat this as example code you may adapt for your local setup.
-
